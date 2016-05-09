@@ -8,7 +8,7 @@
   "use strict";
 
   // jQuery alias
-  var $ = window.$;
+  var $ = jQuery;
 
   // Global batch settings
   $.batchSettings = {
