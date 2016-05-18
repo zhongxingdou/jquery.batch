@@ -231,6 +231,15 @@
         if (callback) {
           callback.call(request.xhr, response.body, request.xhr.statusText, request.xhr);
         }
+
+        var _promise = request.xhr._promise;
+        if (_promise) {
+          if (request.xhr.statusText === 'error') {
+            _promise.reject(response.body, request.xhr.statusText, request.xhr);
+          } else {
+            _promise.resolve(response.body, request.xhr.statusText, request.xhr);
+          }
+        }
       });
     },
 
@@ -254,6 +263,86 @@
     }
 
   });
+
+  var STATE =  {
+    UNSTART: 0,
+    STARTED: 1,
+    SUCCESS: 2,
+    FAILED: 3
+  }
+
+  var MyPromise = function () {
+    this.doneCbs = [];
+    this.failCbs = [];
+    this.alwaysCbs = [];
+    this.state = STATE.UNSTART;
+    this.data = [];
+  }
+
+  MyPromise.prototype = {
+    // data, textStatus, jqXHR
+    reject: function () {
+      var args = arguments;
+      var jqXhr = args[2];
+      this.state = STATE.FAILED;
+      this.failCbs.forEach(function(failCb){
+        failCb.apply(jqXhr, args);
+      })
+      this.alwaysCbs.forEach(function(alwaysCb){
+        alwaysCb.apply(jqXhr, args);
+      })
+      this.data = args;
+      this.doneCbs = [];
+      this.failCbs = [];
+      this.alwaysCbs = [];
+    },
+    // jqXHR, textStatus, errorThrown
+    resolve: function () {
+      var args = arguments;
+      var jqXhr = args[0];
+      this.state = STATE.SUCCESS;
+      this.doneCbs.forEach(function(doneCb){
+        doneCb.apply(jqXhr, args);
+      })
+      this.alwaysCbs.forEach(function(alwaysCb){
+        alwaysCb.apply(jqXhr, args);
+      })
+      this.data = args;
+      this.doneCbs = [];
+      this.failCbs = [];
+      this.alwaysCbs = [];
+    },
+    done: function (doneCb) {
+      if (this.state === STATE.SUCCESS) {
+        doneCb.apply(this.data[2], this.data);
+      } else {
+        this.doneCbs.push(doneCb);
+      }
+      return this;
+    },
+    fail: function (failCb) {
+      if (this.state === STATE.FAILED) {
+        failCb.apply(this.data[2], this.data);
+      } else {
+        this.failCb.push(failCb);
+      }
+      return this;
+    },
+    then: function (doneCb, failCb) {
+      this.done(doneCb);
+      this.fail(failCb);
+      return this;
+    },
+    always: function (alwaysCb) {
+      if (this.state === STATE.SUCCESS ||
+          this.state === STATE.FAILED) {
+        alwaysCb.apply(this.data[2], this.data);
+      } else {
+        this.alwaysCbs.push(alwaysCb);
+      }
+      return this;
+    }
+  }
 
 
   // $.ajax override
@@ -299,7 +388,20 @@
     };
 
     // Run original $.ajax method for all other requests
-    return $ajax.call(this, url, options);
+
+    var jqXhr = $ajax.call(this, url, options);
+
+    if ($.ajaxSettings._batch) {
+      var _promise = new MyPromise()
+      var methods = ['done', 'fail', 'always', 'then']
+      methods.forEach(function(method){
+        jqXhr[method] = _promise[method].bind(_promise)
+      })
+
+      jqXhr._promise = _promise
+    }
+
+    return jqXhr;
   };
 
 })(this);
